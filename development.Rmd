@@ -1,0 +1,112 @@
+---
+title: "development"
+author: "Ellis Valentiner"
+date: "2017-01-29"
+output: html_document
+---
+
+```{r Preamble, include=FALSE}
+suppressPackageStartupMessages(library(dplyr))
+library(tidyr)
+library(purrr)
+library(twitteR)
+library(tidytext)
+library(magrittr)
+library(stringr)
+library(lubridate)
+library(plotly)
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Setup, include=FALSE}
+setup_twitter_oauth(Sys.getenv("twitter_consumer_key"),
+                    Sys.getenv("twitter_consumer_secret"),
+                    Sys.getenv("twitter_access_token"),
+                    Sys.getenv("twitter_access_token_secret"))
+```
+
+```{r Functions, include=FALSE}
+afinn <- sentiments %>%
+  filter(lexicon == "AFINN") %>%
+  dplyr::select(word, score)
+
+get_sentiment <- function(text){
+    text %>%
+        str_replace_all(., "https://t.co/[A-Za-z\\d]+|&amp;", "") %>%
+        unnest_tokens(word, ., token = "regex", pattern = reg) %>%
+        filter(!word %in% stop_words$word, str_detect(word, "[a-z]")) %>%
+        inner_join(nrc, by = "word") %>%
+        count(sentiment, id) %>%
+        ungroup()
+    
+}
+```
+
+```{r Fetch tweets, include=FALSE}
+trump_tweets <- userTimeline("realDonaldTrump", n = 3200)
+
+n <- TRUE
+while (n){
+    minID <- trump_tweets %>%
+        map_df(as.data.frame) %>%
+        tbl_df() %>%
+        summarize(id = min(id)) %>% 
+        extract2("id")
+    
+    newTweets <- userTimeline("realDonaldTrump", n = 3200, maxID = minID)
+    if (length(newTweets)==0){
+        n <- FALSE
+    } else {
+        trump_tweets <- append(trump_tweets, newTweets)
+    }
+}
+
+trump_tweets_df <- trump_tweets %>%
+    map_df(as.data.frame) %>%
+    tbl_df()
+```
+
+```{r Isolate tweets by Trump himself, include=FALSE}
+tweets <- trump_tweets_df %>%
+    filter(str_detect(statusSource, "Android")) %>%
+    select(id, text, created)
+```
+
+```{r, include=FALSE}
+reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"
+tweet_words <- tweets %>%
+  filter(!str_detect(text, '^"')) %>%
+  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|&amp;", "")) %>%
+  unnest_tokens(word, text, token = "regex", pattern = reg) %>%
+  filter(!word %in% stop_words$word,
+         str_detect(word, "[a-z]"))
+```
+
+```{r Assign tweet sentiment rating, include=FALSE}
+tweet_sentiments <- tweet_words %>%
+    mutate(
+        created = date(created)
+    ) %>%
+    inner_join(afinn, by = "word") %>%
+    group_by(created) %>%
+    summarise(
+        score = mean(score)
+    )
+```
+
+```{r Plot 1, echo=FALSE}
+tweet_sentiments %>%
+    ggplot(aes(x=created, y=score, color=score)) +
+    geom_point() +
+    geom_line() +
+    scale_color_gradient() +
+    theme_bw()
+```
+
+```{r Plot 2, echo=FALSE}
+tweet_sentiments %>%
+    plot_ly(x = ~created, y = ~score) %>%
+    add_lines() %>%
+    add_markers()
+```
