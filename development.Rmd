@@ -26,21 +26,10 @@ setup_twitter_oauth(Sys.getenv("twitter_consumer_key"),
                     Sys.getenv("twitter_access_token_secret"))
 ```
 
-```{r Functions, include=FALSE}
+```{r AFINN, include=FALSE}
 afinn <- sentiments %>%
   filter(lexicon == "AFINN") %>%
   dplyr::select(word, score)
-
-get_sentiment <- function(text){
-    text %>%
-        str_replace_all(., "https://t.co/[A-Za-z\\d]+|&amp;", "") %>%
-        unnest_tokens(word, ., token = "regex", pattern = reg) %>%
-        filter(!word %in% stop_words$word, str_detect(word, "[a-z]")) %>%
-        inner_join(nrc, by = "word") %>%
-        count(sentiment, id) %>%
-        ungroup()
-    
-}
 ```
 
 ```{r Fetch tweets, include=FALSE}
@@ -77,8 +66,10 @@ tweets <- trump_tweets_df %>%
 reg <- "([^A-Za-z\\d#@']|'(?![A-Za-z\\d#@]))"
 tweet_words <- tweets %>%
   filter(!str_detect(text, '^"')) %>%
-  mutate(text = str_replace_all(text, "https://t.co/[A-Za-z\\d]+|&amp;", "")) %>%
-  unnest_tokens(word, text, token = "regex", pattern = reg) %>%
+  unnest_tokens(output = word,
+                input = text,
+                token = "regex",
+                pattern = reg) %>%
   filter(!word %in% stop_words$word,
          str_detect(word, "[a-z]"))
 ```
@@ -88,25 +79,29 @@ tweet_sentiments <- tweet_words %>%
     mutate(
         created = date(created)
     ) %>%
-    inner_join(afinn, by = "word") %>%
+    inner_join(get_sentiments("afinn"), by = "word") %>%
+    group_by(created, id) %>%
+    summarize(
+        score = mean(score)
+    ) %>%
     group_by(created) %>%
     summarise(
-        score = mean(score)
+        score = median(score)
     )
 ```
 
 ```{r Plot 1, echo=FALSE}
 tweet_sentiments %>%
-    ggplot(aes(x=created, y=score, color=score)) +
-    geom_point() +
-    geom_line() +
-    scale_color_gradient() +
+    mutate(
+        mvg_avg = zoo::rollmean(score, k = 7, na.pad = TRUE, align = "right") %>% zoo::na.fill("extend")
+    ) %>%
+    ggplot() +
+    geom_line(aes(x=created, y=score), color = "grey") +
+    geom_line(aes(x=created, y=mvg_avg), color = "orange", size = 1.25) +
+    geom_point(aes(x=created, y=score)) +
+    scale_x_date("Tweet Date", date_breaks = "1 month", date_labels = "%b%y") +
+    scale_y_continuous("Sentiment Score", limits = c(-4, 4)) +
     theme_bw()
+ggplotly()
 ```
 
-```{r Plot 2, echo=FALSE}
-tweet_sentiments %>%
-    plot_ly(x = ~created, y = ~score) %>%
-    add_lines() %>%
-    add_markers()
-```
