@@ -1,0 +1,3 @@
+[submodule "political_twitter_archive"]
+	path = political_twitter_archive
+	url = https://github.com/bpb27/political_twitter_archive.git
